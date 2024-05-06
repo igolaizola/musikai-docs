@@ -84,17 +84,27 @@ If set to true, the application will output debug information.
 ### Generate
 
 The `generate` command is used to generate songs.
-You can specify the number of songs to generate, the account to use, the type of song, the prompt, and the style.
-You should use either the prompt or the style, but not both.
+You can specify the number of songs to generate, the account to use, the type of song, the prompt, and whether to use manual mode or not.
+If you use manual mode, the prompt will be directly used in the generation without applying any AI modifications to it.
 
-Suno generates first a fragment of around 2 minutes. 
+Suno generates first a fragment of around 2 minutes.
+Udio generates first a fragment of around 30 seconds.
 Then you can extend this fragments multiple times.
 There are some parameters to control how this extensions are done:
  - Duration of the song: `min-duration` and `max-duration` is used to continue extending or stop extending depending on the current total duration.
  - Number of extensions: `max-extensions` forces to end the generation once the maximum number of extensions is reached.
+
+Suno has a specific parameter to control the end of the song:
  - Final style and lyrics: In order to tell suno that you want to end the song you have to explicitly indicate it in the lyrics and/or style section.
    - Parameters `end-style`, `end-style-append` and `end-lyrics` are applied when minimum duration is reached and it is the first extension.
    - Parameters `force-end-style` and `force-end-lyrics` are applied when minimum duration is reached and it isn't the first extension.
+
+Udio needs a captcha resolver to bypass the captcha.
+You can use `nopecha` to solve the captcha manually or `2captcha` to use a service to solve the captcha.
+Captcha providers connect to your computer using a proxy.
+The tool starts a local server that the captcha provider connects to.
+You need to have ngrok installed in your computer so the tool can expose the local server to the captcha provider.
+You can avoid this by using the same proxy both in `proxy` and `captcha-proxy`.
 
 ```bash
 ./musikai generate --config generate.yaml
@@ -111,18 +121,24 @@ concurrency: 1
 wait-min: 1s
 wait-max: 2s
 limit: 20
-account: suno-account
+account: account-name
+provider: suno # suno or udio
 type: jazz
-prompt: jazz
-style: nostalgic mood ambient jazz
+prompt: nostalgic mood ambient jazz
+manual: true
+min-duration: 2m5s
+max-duration: 3m55s
+max-extensions: 1
+# suno specific parameters
 end-lyrics: "[end]"
 end-style: ". End." # leave empty to use copy the song style
 end-style-append: true # append the value instead of replacing it
 force-end-lyrics: "[end]"
 force-end-style: short, end # leave empty to use copy the song style
-min-duration: 2m5s
-max-duration: 3m55s
-max-extensions: 1
+# udio specific parameters
+captcha-key: captcha-service-key
+captcha-provider: nopecha # nopecha or 2captcha
+captcha-proxy: http://proxy-url # optional
 ```
 
 You can also use a csv/json file to use multiple prompts or styles.
@@ -174,6 +190,8 @@ long-fadeout: 6s
 
 The `web` command is used to launch a web application to manage the songs, covers and albums.
 This is used to manually approve or reject songs, covers and albums.
+Use the `creds` option to set the username and password to access the web app.
+Use the `volumes` option to mount external directories in the web app.
 
 ```bash
 ./musikai web --config web.yaml
@@ -187,7 +205,9 @@ db-type: sqlite
 db-conn: musikai.db
 fs-type: local
 fs-conn: /path/to/directory
-port: 1337
+addr: :1337
+creds: user1:pass1,user2:pass2
+volumes: ./my-data:/data,./my-app:/app
 ```
 
 ### Setting
@@ -222,6 +242,18 @@ debug: false
 db-type: sqlite
 db-conn: musikai.db
 input: /path/to/file.csv
+```
+
+The file must have the following fields:
+
+ - Type is the classification of the songs.
+ - Style is the style of the song (optional).
+ - Title is the name of the song.
+
+```csv
+type,style,title
+jazz,nostalgic mood ambient jazz,Blue Moon Over The City
+jazz,nostalgic mood ambient jazz,The Night We Met
 ```
 
 ### Draft
@@ -448,7 +480,14 @@ type: jazz
 
 ### Sync
 
-The `sync` command is used to obtain album UPC codes and song ISCR codes from DistroKid.
+The `sync` command is used to obtain the following data from DistroKid and digital stores:
+ - Album UPC code
+ - Song ISRC codes
+ - Spotify ID
+ - Spotify song features
+ - Apple Music ID
+ - YouTube ID
+
 The album must have been already published to digital stores in order to obtain the codes.
 
 ```bash
@@ -573,12 +612,12 @@ You need to configure a Suno account to generate songs
 
 You need to capture the cookie from Suno website.
 
-1. Go to https://app.suno.ai/
+1. Go to https://suno.com/
 2. Login if you are not already logged in
 3. Open the developer tools (F12)
 4. Go to the "Network" tab
 5. Refresh the page
-6. Click on the first request to `https://clerk.suno.ai/v1/client?_clerk_js_version=4.70.1`
+6. Click on the first request to `https://clerk.suno.com/v1/client?_clerk_js_version=4.70.1`
 7. Go to the "Request Headers"
 8. Copy the "cookie" header
 
@@ -598,6 +637,74 @@ db-conn: see common options
 service: suno
 account: accountname
 value: cookievalue
+```
+
+### Udio
+
+You need to configure a Udio account to generate songs
+
+You need to capture the cookie from Udio website.
+
+1. Go to https://www.udio.com/
+2. Login if you are not already logged in
+3. Open the developer tools (F12)
+4. Go to the "Network" tab
+5. Refresh the page
+6. Click on the first request to `https://www.udio.com/api/users/current`
+7. Go to the "Request Headers"
+8. Copy the "cookie" header
+
+Then you must store the cookie in your database.
+You can use the command `setting` to store the cookie in the settings table.
+Pass the cookie as the value and choose a name for the account.
+
+```bash
+./musikai setting --config cookie.yaml
+```
+
+```yaml	
+# cookie.yaml
+debug: false
+db-type: see common options
+db-conn: see common options
+service: udio
+account: accountname
+value: cookievalue
+```
+
+#### Captcha resolver
+
+Udio needs a captcha resolver to bypass the captcha.
+You can use either https://nopecha.com or https://2captcha.com as the captcha provider.
+Create an account in any of the services and obtain the API key.
+
+```yaml
+# settings to be added to generate.yaml
+captcha-key: captcha-service-key
+captcha-provider: nopecha # nopecha or 2captcha
+```
+
+#### Ngrok tunnel
+
+The captcha provider needs a way to connect to your computer.
+This is because both the requests to udio and requests to the captcha provider must come from the same IP address.
+By default it will use ngrok to expose a local server to the internet.
+
+To install ngrok, go to https://ngrok.com/download and follow the instructions.
+You also need to create an account in ngrok and obtain the authtoken.
+To authenticate with ngrok, go to https://dashboard.ngrok.com/get-started/your-authtoken and copy the token.
+
+```bash
+ngrok authtoken your-authtoken
+```
+
+Alternatively, you can use a proxy to connect to the captcha provider.
+The proxy must be accessible from the internet and must be used in the `proxy` option as well as in the `captcha-proxy` option.
+
+```yaml
+# settings to be added to generate.yaml
+proxy: http://my-proxy.com
+captcha-proxy: http://my-proxy.com
 ```
 
 ### DistroKid
